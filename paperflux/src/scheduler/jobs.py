@@ -8,6 +8,7 @@ from src.services.database import DatabaseService
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+
 class PaperProcessingScheduler:
     def __init__(self):
         self.scheduler = BackgroundScheduler()
@@ -34,7 +35,7 @@ class PaperProcessingScheduler:
         """Notify all registered callbacks that a paper has been processed"""
         with self._lock:
             callbacks = list(self.refresh_callbacks)
-        
+
         for callback in callbacks:
             try:
                 callback()
@@ -48,9 +49,9 @@ class PaperProcessingScheduler:
             paper_obj = self.fetcher.parse_paper_data(paper_entry)
             paper_obj.explanation = explanation
             self.db.insert_paper(paper_obj)
-            
+
             self._notify_refresh()
-            
+
             return True
         except Exception as e:
             print(f"Error analyzing paper {paper_entry['paper']['id']}: {str(e)}")
@@ -69,12 +70,12 @@ class PaperProcessingScheduler:
 
         self._running = True
         print("Starting daily paper processing...")
-        
+
         try:
             self.db.clear_collection()
             # Fetch list of all papers
             papers = await self.fetcher.fetch_papers()
-            
+
             # Download all papers in parallel(BG thread)
             paper_paths = await self.fetcher.download_papers(papers)
 
@@ -88,13 +89,13 @@ class PaperProcessingScheduler:
                             executor.submit(
                                 self.analyze_and_store_paper,
                                 paper,
-                                paper_paths[paper_id]
+                                paper_paths[paper_id],
                             )
                         )
-                            
+
                 for future in futures:
                     future.result()
-                    
+
         except Exception as e:
             print(f"Error in paper processing: {str(e)}")
         finally:
@@ -103,10 +104,10 @@ class PaperProcessingScheduler:
     def start(self):
         self.scheduler.add_job(
             lambda: asyncio.run(self.process_papers()),
-            'cron',
+            "cron",
             hour=0,
             minute=0,
-            next_run_time=datetime.now()
+            next_run_time=datetime.now(),
         )
         self.scheduler.start()
 

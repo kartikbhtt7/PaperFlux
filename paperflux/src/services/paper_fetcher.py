@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional
 from src.config.settings import HF_API_URL, PDF_BASE_URL, TEMP_DIR
 from paperflux.src.models.models import Paper
 
+
 class PaperFetcher:
     def __init__(self):
         os.makedirs(TEMP_DIR, exist_ok=True)
@@ -71,5 +72,5 @@ class PaperFetcher:
             authors=paper_data["authors"],
             summary=paper_data["summary"],
             published_at=paper_data["publishedAt"],
-            pdf_url=PDF_BASE_URL.format(id=paper_data["id"])
+            pdf_url=PDF_BASE_URL.format(id=paper_data["id"]),
         )
