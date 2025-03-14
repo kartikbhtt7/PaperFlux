@@ -33,3 +33,15 @@ class Paper:
             "pdf_url": self.pdf_url,
             "processed_at": self.processed_at,
         }
+
+
+class ProcessingMetadata:
+    def __init__(self, last_processed_date: datetime = None):
+        self.last_processed_date = last_processed_date or datetime.utcnow()
+        self.is_processing = False
+    
+    def to_dict(self) -> Dict:
+        return {
+            "last_processed_date": self.last_processed_date,
+            "is_processing": self.is_processing
+        }
