@@ -14,6 +14,7 @@ class PaperAnalyzer:
         logger.info("Initializing PaperAnalyzer")
         load_dotenv()
 
+        # API keys from environment variables
         self.api_keys = [
             value
             for key, value in os.environ.items()
@@ -24,8 +25,15 @@ class PaperAnalyzer:
             logger.error("No Gemini API keys found in environment variables")
             raise ValueError("No Gemini API keys found. Please add GEMINI_API_KEY* to .env file")
             
+        logger.info(f"Found {len(self.api_keys)} Gemini API keys")
         self.key_index = 0
-        genai.configure(api_key=self.api_keys[0])
+        
+        # Configure with the first API key
+        self._configure_client()
+        
+    def _configure_client(self):
+        """Configure the Gemini client with the current API key"""
+        genai.configure(api_key=self.api_keys[self.key_index])
         self.model = genai.GenerativeModel("gemini-1.5-pro-latest")
         self.safety_settings = {
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -33,11 +41,12 @@ class PaperAnalyzer:
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
+        logger.info(f"Using API key at index {self.key_index}")
 
     def change_api_key(self):
         """Rotate to the next API key"""
         self.key_index = (self.key_index + 1) % len(self.api_keys)
-        genai.configure(api_key=self.api_keys[self.key_index])
+        self._configure_client()
         logger.info(f"Switched to API key index: {self.key_index}")
 
     def analyze_paper(self, pdf_path: str) -> str:
@@ -73,14 +82,15 @@ class PaperAnalyzer:
                         generation_config={"temperature": 0.2},
                     )
                     
-                    # Success, rotate API key for load balancing
-                    self.change_api_key()
-                    
                     # Clean up
                     try:
                         genai.delete_file(uploaded_file.name)
                     except Exception as e:
                         logger.warning(f"Failed to delete uploaded file: {str(e)}")
+                    
+                    # Rotate to the next API key after successful completion
+                    # This way we distribute load across all keys
+                    self.change_api_key()
                     
                     return response.text
                     
@@ -88,7 +98,7 @@ class PaperAnalyzer:
                     logger.error(f"Error analyzing paper (attempt {attempt}): {str(e)}")
                     
                     # If rate limited, wait and try again with different key
-                    if "429" in str(e):
+                    if "429" in str(e) or "quota" in str(e).lower():
                         wait_time = min(60 * attempt, 180)  # Progressive backoff
                         logger.info(f"Rate limited, waiting {wait_time} seconds")
                         time.sleep(wait_time)

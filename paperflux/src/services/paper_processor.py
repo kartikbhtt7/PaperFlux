@@ -38,7 +38,7 @@ class PaperProcessor:
             
         finally:
             # Clean up
-            if os.path.exists(pdf_path):
+            if pdf_path and os.path.exists(pdf_path):
                 try:
                     os.remove(pdf_path)
                     logger.debug(f"Removed temporary file: {pdf_path}")
@@ -62,12 +62,18 @@ class PaperProcessor:
             
             # Fetch list of all papers
             papers = await self.fetcher.fetch_papers()
+            logger.info(f"Fetched {len(papers)} papers, downloading PDFs...")
 
             # Download all papers in parallel
             paper_paths = await self.fetcher.download_papers(papers)
+            logger.info(f"Successfully downloaded {len(paper_paths)} out of {len(papers)} papers")
 
-            # Can increase workers to speed up processing, requires more api keys (sed emoji*)
-            with ThreadPoolExecutor(max_workers=2) as executor:
+            # Configure thread pool based on number of available API keys
+            api_key_count = len(self.analyzer.api_keys)
+            max_workers = min(api_key_count, 10)
+            
+            logger.info(f"Starting analysis with {max_workers} workers")
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
 
                 for paper in papers:
@@ -80,9 +86,15 @@ class PaperProcessor:
                                 paper_paths[paper_id],
                             )
                         )
+                    else:
+                        logger.warning(f"Skipping paper {paper_id} - PDF download failed")
 
+                processed_count = 0
                 for future in futures:
-                    future.result()
+                    if future.result():
+                        processed_count += 1
+                
+                logger.info(f"Successfully processed {processed_count} out of {len(futures)} papers")
                     
             # Update last processed date
             self.db.update_last_processed_date()

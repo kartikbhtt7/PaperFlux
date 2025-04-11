@@ -6,6 +6,7 @@ import base64
 from datetime import datetime
 import time
 import logging
+import pytz
 
 # Configure logging
 logging.basicConfig(
@@ -16,6 +17,7 @@ logger = logging.getLogger("paperflux.app")
 
 from src.services.database import DatabaseService
 from src.services.paper_processor import PaperProcessor
+from src.services.scheduler import PaperScheduler
 from src.config.settings import TEMP_DIR
 
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -23,6 +25,9 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # Initialize services
 db_service = DatabaseService()
 paper_processor = PaperProcessor()
+
+# Start the scheduler in the background
+scheduler = PaperScheduler()
 
 # Function to run asyncio tasks from Streamlit
 def run_async(func):
@@ -46,10 +51,6 @@ def get_pdf_download_link(paper_id, paper_title):
         # Get the paper from the database
         paper = db_service.get_paper_by_id(paper_id)
         
-        if not paper or not paper.get("pdf_url"):
-            logger.error(f"PDF URL not found in database for paper ID: {paper_id}")
-            return "PDF download unavailable"
-        
         # Use the PDF URL stored in the database
         pdf_url = paper["pdf_url"]
         
@@ -72,6 +73,11 @@ if 'processing_started' not in st.session_state:
     st.session_state.processing_started = False
 if 'current_paper_index' not in st.session_state:
     st.session_state.current_paper_index = 0
+if 'scheduler_started' not in st.session_state:
+    st.session_state.scheduler_started = False
+    # Start the scheduler when the app loads
+    scheduler.start_scheduler()
+    st.session_state.scheduler_started = True
 
 # App header
 st.title("📚 PaperFlux")
@@ -84,34 +90,38 @@ st.sidebar.markdown(
     PaperFlux extracts and analyzes top AI research papers from Hugging Face's 
     daily curated list. Each paper is summarized and explained in depth.
     
-    Papers are updated once daily.
+    Papers are updated automatically once daily at 8:00 AM UTC on weekdays.
     """
 )
 
 # Display processing status
 metadata = db_service.get_processing_metadata()
 last_processed = metadata.last_processed_date.strftime("%Y-%m-%d %H:%M UTC")
-st.sidebar.markdown(f"**Last updated:** {last_processed}")
+next_processing = "8:00 AM UTC Tomorrow" if datetime.now(pytz.UTC).hour >= 8 else "8:00 AM UTC Today"
 
-# Check if we should process papers
-if 'should_process' not in st.session_state:
-    st.session_state.should_process = db_service.should_process_today()
-is_processing = metadata.is_processing or st.session_state.processing_started
+st.sidebar.markdown(f"**Last updated:** {last_processed}")
+st.sidebar.markdown(f"**Next scheduled update:** {next_processing}")
 
 # Processing controls
 st.sidebar.header("Data Processing")
+is_processing = metadata.is_processing or st.session_state.processing_started
+
 if is_processing:
     st.sidebar.info("Processing papers... This may take several minutes.")
     st.sidebar.progress(0.5)  # Indeterminate progress bar
-elif st.session_state.should_process:
-    if st.sidebar.button("Process Today's Papers", key="process_btn"):
-        # Start processing in background thread
-        threading.Thread(target=process_papers_background).start()
-        st.sidebar.info("Processing started! This may take several minutes.")
-        time.sleep(1)  # Give time for the thread to start
-        st.rerun()  # Rerun to update UI
 else:
-    st.sidebar.success("Today's papers have been processed! ✅")
+    # Check if manual processing is allowed
+    should_process = db_service.should_process_today()
+    if should_process:
+        if st.sidebar.button("Process Papers Now", key="process_btn"):
+            # Start processing in background thread
+            threading.Thread(target=process_papers_background).start()
+            st.sidebar.info("Processing started! This may take several minutes.")
+            time.sleep(1)  # Give time for the thread to start
+            st.rerun()  # Rerun to update UI
+    else:
+        st.sidebar.success("Today's papers have already been processed! ✅")
+        st.sidebar.info("Papers are automatically updated each weekday at 8:00 AM UTC.")
 
 # Main content
 tab1, tab2 = st.tabs(["📋 Paper List", "ℹ️ About"])
@@ -124,7 +134,7 @@ with tab1:
         if is_processing:
             st.info("Loading papers... Please wait.")
         else:
-            st.warning("No papers available. Click 'Process Today's Papers' in the sidebar to fetch the latest research.")
+            st.warning("No papers available yet. The system will automatically fetch the latest research papers at 8:00 AM UTC.")
     else:
         st.success(f"Displaying {len(papers)} research papers")
         
@@ -207,14 +217,15 @@ with tab2:
     
     ### How it works
     
-    1. **Data Collection**: We fetch the daily curated papers from Hugging Face's API.
-    2. **Document Processing**: Each paper is downloaded and analyzed.
-    3. **AI Analysis**: Using Google's Gemini Pro AI, we generate in-depth explanations of each paper.
-    4. **Data Storage**: All information is cached in a MongoDB database for fast access.
+    1. **Data Collection**: We automatically fetch the daily curated papers from Hugging Face's API.
+    2. **Automatic Processing**: Papers are processed every weekday at 8:00 AM UTC.
+    3. **Document Analysis**: Each paper is downloaded and analyzed using Google's Gemini Pro AI.
+    4. **API Load Balancing**: We automatically rotate between multiple API keys to prevent rate limiting issues.
+    5. **Data Storage**: All information is cached in a MongoDB database for fast access.
     
     ### Features
     
-    - **Daily Updates**: New papers are processed once per day.
+    - **Daily Updates**: New papers are processed once per day automatically.
     - **In-depth Analysis**: Get detailed explanations of complex research.
     - **Original Access**: Download the original PDF of any paper.
     
